@@ -93,7 +93,10 @@ Every recommendation includes a personalized **"Why"** explanation — not just 
 ├── architecture.md                     # Detailed architecture & design decisions
 ├── CLAUDE.md                           # Project context for Claude
 ├── .env.example                        # Environment variables template
-└── .gitignore
+├── .gitignore
+├── data/                               # Runtime: fetched articles (gitignored)
+├── recommendations/                    # Runtime: generated JSONs & HTML (gitignored)
+└── logs/                               # Runtime: run logs (gitignored)
 ```
 
 ## Prerequisites

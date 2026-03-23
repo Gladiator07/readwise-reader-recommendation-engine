@@ -7,7 +7,7 @@ description: Generates personalized reading recommendations from your Readwise i
 
 This skill generates personalized reading recommendations by:
 1. Fetching articles from Readwise Reader
-2. Analyzing your current focus (from Bear notes)
+2. Analyzing your current focus (from `current_focus.md` or Bear notes)
 3. Analyzing your reading patterns (from recently archived articles)
 4. Matching inbox articles against both signals
 5. Sending recommendations via email
@@ -191,7 +191,7 @@ The script will:
 
 The `current-focus-analyst` agent uses a dedicated Bear notes skill (`bear-notes-skill`) to read notes safely. If this skill fails, errors out, or is unavailable:
 
-1. **DO NOT** try to read Bear's database at `~/Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear/Application Data/database.sqlite`
+1. **DO NOT** try to read Bear's database directly (it's in a macOS-protected Group Containers path)
 2. **DO NOT** attempt SQL queries against any Bear database files
 3. **DO NOT** try to find alternative paths to Bear's data
 
