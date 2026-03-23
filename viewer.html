@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Run Viewer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        h1 {
+            color: #00d9ff;
+            margin-bottom: 10px;
+            font-size: 1.5rem;
+        }
+        .status {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        .status.live { color: #4ade80; }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover { background: #444; }
+        button.active { background: #00d9ff; color: #000; }
+        #log {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .entry {
+            background: #252540;
+            border-radius: 8px;
+            padding: 12px;
+            border-left: 4px solid #555;
+        }
+        .entry.assistant { border-color: #00d9ff; }
+        .entry.user { border-color: #888; }
+        .entry.system { border-color: #f59e0b; }
+        .entry-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+            color: #888;
+        }
+        .entry-type {
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .entry.assistant .entry-type { color: #00d9ff; }
+        .entry.user .entry-type { color: #888; }
+        .entry.system .entry-type { color: #f59e0b; }
+        .content { white-space: pre-wrap; line-height: 1.5; }
+        .tool-use {
+            background: #1e3a5f;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 8px 0;
+        }
+        .tool-name {
+            color: #f472b6;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .tool-input {
+            background: #0d1b2a;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+        .tool-result {
+            background: #1a3d2e;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 8px 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .tool-result.error { background: #3d1a1a; }
+        .text-content { color: #e0e0e0; }
+        .hidden { display: none; }
+        #file-input-area {
+            background: #252540;
+            border: 2px dashed #555;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #file-input-area:hover { border-color: #00d9ff; }
+        input[type="file"] { display: none; }
+        .drop-label { color: #888; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Claude Run Viewer</h1>
+    <p class="status" id="status">Drop a log file or paste JSON</p>
+
+    <div id="file-input-area">
+        <label class="drop-label" for="file-input">
+            📁 Click to select log file or drag & drop<br>
+            <small>Supports stream-json output from claude -p</small>
+        </label>
+        <input type="file" id="file-input" accept=".json,.log,.txt">
+    </div>
+
+    <div class="controls">
+        <button id="btn-all" class="active">All</button>
+        <button id="btn-text">Text Only</button>
+        <button id="btn-tools">Tools Only</button>
+        <button id="btn-clear">Clear</button>
+        <label style="margin-left: 20px; color: #888;">
+            <input type="checkbox" id="auto-scroll" checked> Auto-scroll
+        </label>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
+        const fileInput = document.getElementById('file-input');
+        const fileInputArea = document.getElementById('file-input-area');
+        let filter = 'all';
+        let entries = [];
+
+        // Filter buttons
+        document.getElementById('btn-all').onclick = () => setFilter('all');
+        document.getElementById('btn-text').onclick = () => setFilter('text');
+        document.getElementById('btn-tools').onclick = () => setFilter('tools');
+        document.getElementById('btn-clear').onclick = () => { entries = []; render(); };
+
+        function setFilter(f) {
+            filter = f;
+            document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + f).classList.add('active');
+            render();
+        }
+
+        let lastEntryCount = 0;
+        let userScrolledUp = false;
+
+        // Detect manual scroll
+        window.addEventListener('scroll', () => {
+            const atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 100;
+            userScrolledUp = !atBottom;
+        });
+
+        function render() {
+            log.innerHTML = '';
+            entries.forEach(entry => {
+                if (filter === 'text' && !entry.hasText) return;
+                if (filter === 'tools' && !entry.hasTool) return;
+                log.appendChild(entry.element);
+            });
+
+            // Only auto-scroll if new entries added AND user hasn't scrolled up AND checkbox is checked
+            const hasNewEntries = entries.length > lastEntryCount;
+            if (hasNewEntries && !userScrolledUp && document.getElementById('auto-scroll').checked) {
+                window.scrollTo(0, document.body.scrollHeight);
+            }
+            lastEntryCount = entries.length;
+        }
+
+        function parseEntry(line) {
+            try {
+                const data = JSON.parse(line);
+                return createEntryElement(data);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function createEntryElement(data) {
+            const div = document.createElement('div');
+            div.className = `entry ${data.type || 'unknown'}`;
+
+            let hasText = false;
+            let hasTool = false;
+            let content = '';
+
+            if (data.type === 'system' && data.subtype === 'init') {
+                content = `<div class="tool-use"><div class="tool-name">🚀 Session Started</div>`;
+                content += `<div class="tool-input">Model: ${data.model || 'unknown'}\nTools: ${(data.tools || []).length} available\nSkills: ${(data.skills || []).join(', ')}</div></div>`;
+                hasTool = true;
+            } else if (data.type === 'assistant' && data.message?.content) {
+                data.message.content.forEach(item => {
+                    if (item.type === 'text') {
+                        content += `<div class="text-content">${escapeHtml(item.text)}</div>`;
+                        hasText = true;
+                    } else if (item.type === 'tool_use') {
+                        content += `<div class="tool-use">`;
+                        content += `<div class="tool-name">🔧 ${item.name}</div>`;
+                        content += `<div class="tool-input">${formatToolInput(item.input)}</div>`;
+                        content += `</div>`;
+                        hasTool = true;
+                    }
+                });
+            } else if (data.type === 'user' && data.message?.content) {
+                data.message.content.forEach(item => {
+                    if (item.type === 'tool_result') {
+                        const isError = item.is_error;
+                        content += `<div class="tool-result ${isError ? 'error' : ''}">`;
+                        content += `<strong>${isError ? '❌' : '✅'} Tool Result</strong><br>`;
+                        const resultText = typeof item.content === 'string'
+                            ? item.content
+                            : JSON.stringify(item.content, null, 2);
+                        const truncateAt = 2000;
+                        const isTruncated = resultText.length > truncateAt;
+                        const uniqueId = 'result-' + Math.random().toString(36).substr(2, 9);
+                        content += `<pre id="${uniqueId}">${escapeHtml(resultText.slice(0, truncateAt))}${isTruncated ? '...' : ''}</pre>`;
+                        if (isTruncated) {
+                            content += `<button onclick="document.getElementById('${uniqueId}').textContent = decodeURIComponent('${encodeURIComponent(resultText)}'); this.remove();" style="font-size:0.8rem;margin-top:4px;">Show full (${resultText.length} chars)</button>`;
+                        }
+                        content += `</div>`;
+                        hasTool = true;
+                    }
+                });
+            }
+
+            if (!content) return null;
+
+            div.innerHTML = `
+                <div class="entry-header">
+                    <span class="entry-type">${data.type || 'unknown'}</span>
+                    <span>${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div class="content">${content}</div>
+            `;
+
+            return { element: div, hasText, hasTool };
+        }
+
+        function formatToolInput(input) {
+            if (!input) return '';
+            if (typeof input === 'string') return escapeHtml(input);
+
+            let result = '';
+            for (const [key, value] of Object.entries(input)) {
+                const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+                const displayVal = valStr.length > 200 ? valStr.slice(0, 200) + '...' : valStr;
+                result += `<strong>${key}:</strong> ${escapeHtml(displayVal)}\n`;
+            }
+            return result;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function processFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const lines = e.target.result.split('\n').filter(l => l.trim());
+                entries = [];
+                lines.forEach(line => {
+                    const entry = parseEntry(line);
+                    if (entry) entries.push(entry);
+                });
+                status.textContent = `Loaded ${entries.length} entries from ${file.name}`;
+                status.className = 'status live';
+                render();
+            };
+            reader.readAsText(file);
+        }
+
+        // File input
+        fileInput.onchange = (e) => {
+            if (e.target.files[0]) processFile(e.target.files[0]);
+        };
+
+        // Drag and drop
+        fileInputArea.ondragover = (e) => { e.preventDefault(); fileInputArea.style.borderColor = '#00d9ff'; };
+        fileInputArea.ondragleave = () => { fileInputArea.style.borderColor = '#555'; };
+        fileInputArea.ondrop = (e) => {
+            e.preventDefault();
+            fileInputArea.style.borderColor = '#555';
+            if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+        };
+
+        // Live file watching (reload every 2s if file selected)
+        let currentFile = null;
+        fileInput.onchange = (e) => {
+            currentFile = e.target.files[0];
+            if (currentFile) {
+                processFile(currentFile);
+                // Set up polling for live updates
+                setInterval(() => {
+                    if (currentFile) processFile(currentFile);
+                }, 2000);
+            }
+        };
+    </script>
+</body>
+</html>

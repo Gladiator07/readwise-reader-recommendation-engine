@@ -1,0 +1,8 @@
+data/
+recommendations/
+logs/
+*.log
+*.err
+*.pyc
+__pycache__/
+.env
